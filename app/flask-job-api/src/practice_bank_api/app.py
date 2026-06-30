@@ -8,6 +8,25 @@ from practice_bank_api.azure_containerapps import ContainerAppJobError, Containe
 from practice_bank_api.config import Settings
 
 
+COMPOSE_UNITS = {
+    "batch": {"jobName": "pb-batch", "source": "legacy/default", "description": "Default runtime smoke Job"},
+    "dbcheck": {"jobName": "pb-dbcheck", "source": "ad-hoc", "description": "Database migration/check Job"},
+    "calendar-init": {"jobName": "pb-init-calendar", "source": "infra/compose.calendar-init.yaml", "description": "01-calendar master load"},
+    "branch-init": {"jobName": "pb-init-branch", "source": "infra/compose.branch-init.yaml", "description": "02-branch master load"},
+    "customer-init": {"jobName": "pb-init-customer", "source": "infra/compose.customer-init.yaml", "description": "03-customer master load"},
+    "product-init": {"jobName": "pb-init-product", "source": "infra/compose.product-init.yaml", "description": "05-product master load"},
+    "interestrate-init": {"jobName": "pb-init-interestrate", "source": "infra/compose.interestrate-init.yaml", "description": "06-interestrate master load"},
+    "feeschedule-init": {"jobName": "pb-init-feeschedule", "source": "infra/compose.feeschedule-init.yaml", "description": "07-feeschedule master load"},
+    "account-init": {"jobName": "pb-init-account", "source": "infra/compose.account-init.yaml", "description": "08-account master load"},
+    "batch-daily-rt": {"jobName": "pb-batch-daily-rt", "source": "manual", "description": "Manual daily batch runtime Job"},
+    "batch-daily": {"jobName": "pb-batch-daily", "source": "infra/compose.batch-daily.yaml", "description": "Scheduled daily batch pipeline"},
+    "dormancy-scan": {"jobName": "pb-dormancy-scan", "source": "infra/job-dormancy-scan.yaml", "description": "09-accountlifecycle dormancy scan"},
+    "batch-monthly": {"jobName": "pb-batch-monthly", "source": "infra/job-batch-monthly.yaml", "description": "Monthly batch pipeline"},
+    "partition-rollover": {"jobName": "pb-partition-rollover", "source": "infra/job-partition-rollover.yaml", "description": "Audit partition rollover"},
+    "txn-smoke": {"jobName": "pb-txn-smoke", "source": "infra/job-txn-smoke.yaml", "description": "Non-destructive 10/11 transaction pipeline smoke"},
+}
+
+
 def create_app() -> Flask:
     settings = Settings.from_env()
     client = ContainerAppJobsClient(
@@ -35,6 +54,26 @@ def create_app() -> Flask:
     @app.get("/docs")
     def swagger_ui():
         return Response(_swagger_ui_html(), mimetype="text/html")
+
+    @app.get("/units")
+    def list_units():
+        return jsonify({"units": _unit_metadata(settings)})
+
+    @app.post("/units/<unit_name>/runs")
+    def start_unit(unit_name: str):
+        job_name = _job_name_for_unit(settings, unit_name)
+        result = client.start_job(job_name)
+        return jsonify({"unitName": unit_name, "jobName": job_name, "start": result}), 202
+
+    @app.get("/units/<unit_name>/runs")
+    def list_unit_runs(unit_name: str):
+        job_name = _job_name_for_unit(settings, unit_name)
+        return jsonify({"unitName": unit_name, "jobName": job_name, "runs": client.list_executions(job_name)})
+
+    @app.get("/units/<unit_name>/runs/<execution_name>")
+    def get_unit_run(unit_name: str, execution_name: str):
+        job_name = _job_name_for_unit(settings, unit_name)
+        return jsonify({"unitName": unit_name, "jobName": job_name, "run": client.get_execution(job_name, execution_name)})
 
     @app.post("/jobs/<job_name>/runs")
     def start_job(job_name: str):
@@ -69,6 +108,24 @@ def _ensure_allowed_job(settings: Settings, job_name: str) -> None:
         raise PermissionError("job is not exposed by this API")
 
 
+def _job_name_for_unit(settings: Settings, unit_name: str) -> str:
+    unit = COMPOSE_UNITS.get(unit_name)
+    if unit is None:
+        raise PermissionError("unit is not exposed by this API")
+    job_name = unit["jobName"]
+    _ensure_allowed_job(settings, job_name)
+    return job_name
+
+
+def _unit_metadata(settings: Settings) -> list[dict]:
+    units = []
+    for unit_name, unit in COMPOSE_UNITS.items():
+        job_name = unit["jobName"]
+        if job_name in settings.allowed_jobs:
+            units.append({"unitName": unit_name, **unit})
+    return units
+
+
 def _openapi_spec(settings: Settings) -> dict:
     return {
         "openapi": "3.0.3",
@@ -80,6 +137,7 @@ def _openapi_spec(settings: Settings) -> dict:
         "servers": [{"url": "/"}],
         "tags": [
             {"name": "health", "description": "API health checks"},
+            {"name": "units", "description": "Compose/job-yaml deployment units"},
             {"name": "jobs", "description": "Existing COBOL Azure Container Apps Jobs"},
         ],
         "paths": {
@@ -92,6 +150,70 @@ def _openapi_spec(settings: Settings) -> dict:
                             "description": "API is ready",
                             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Health"}}},
                         }
+                    },
+                }
+            },
+            "/units": {
+                "get": {
+                    "tags": ["units"],
+                    "summary": "List wrapped compose/job-yaml units",
+                    "responses": {
+                        "200": {
+                            "description": "Wrapped units and their backing ACA Jobs",
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/UnitList"}}},
+                        }
+                    },
+                }
+            },
+            "/units/{unitName}/runs": {
+                "get": {
+                    "tags": ["units"],
+                    "summary": "List executions by compose/job-yaml unit",
+                    "parameters": [_unit_name_parameter(settings)],
+                    "responses": {
+                        "200": {
+                            "description": "Executions returned by Azure Container Apps",
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/UnitRunList"}}},
+                        },
+                        "404": {"description": "Unit or backing Job is not exposed by this API"},
+                        "502": {"description": "Azure Container Apps request failed"},
+                    },
+                },
+                "post": {
+                    "tags": ["units"],
+                    "summary": "Start a Job execution by compose/job-yaml unit",
+                    "parameters": [_unit_name_parameter(settings)],
+                    "responses": {
+                        "202": {
+                            "description": "Azure accepted the Job start request",
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/StartUnitResponse"}}},
+                        },
+                        "404": {"description": "Unit or backing Job is not exposed by this API"},
+                        "502": {"description": "Azure Container Apps request failed"},
+                    },
+                },
+            },
+            "/units/{unitName}/runs/{executionName}": {
+                "get": {
+                    "tags": ["units"],
+                    "summary": "Get one execution by compose/job-yaml unit",
+                    "parameters": [
+                        _unit_name_parameter(settings),
+                        {
+                            "name": "executionName",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string"},
+                            "example": "pb-batch-gesqxil",
+                        },
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "Execution returned by Azure Container Apps",
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/UnitRunResponse"}}},
+                        },
+                        "404": {"description": "Unit or backing Job is not exposed by this API"},
+                        "502": {"description": "Azure Container Apps request failed"},
                     },
                 }
             },
@@ -157,6 +279,29 @@ def _openapi_spec(settings: Settings) -> dict:
                         "allowedJobs": {"type": "array", "items": {"type": "string"}, "example": list(settings.allowed_jobs)},
                     },
                 },
+                "Unit": {
+                    "type": "object",
+                    "properties": {
+                        "unitName": {"type": "string", "example": "calendar-init"},
+                        "jobName": {"type": "string", "example": "pb-init-calendar"},
+                        "source": {"type": "string", "example": "infra/compose.calendar-init.yaml"},
+                        "description": {"type": "string"},
+                    },
+                },
+                "UnitList": {
+                    "type": "object",
+                    "properties": {
+                        "units": {"type": "array", "items": {"$ref": "#/components/schemas/Unit"}},
+                    },
+                },
+                "StartUnitResponse": {
+                    "type": "object",
+                    "properties": {
+                        "unitName": {"type": "string", "example": "calendar-init"},
+                        "jobName": {"type": "string", "example": "pb-init-calendar"},
+                        "start": {"type": "object", "additionalProperties": True},
+                    },
+                },
                 "StartJobResponse": {
                     "type": "object",
                     "properties": {
@@ -171,9 +316,25 @@ def _openapi_spec(settings: Settings) -> dict:
                         "runs": {"type": "array", "items": {"$ref": "#/components/schemas/Run"}},
                     },
                 },
+                "UnitRunList": {
+                    "type": "object",
+                    "properties": {
+                        "unitName": {"type": "string"},
+                        "jobName": {"type": "string"},
+                        "runs": {"type": "array", "items": {"$ref": "#/components/schemas/Run"}},
+                    },
+                },
                 "RunResponse": {
                     "type": "object",
                     "properties": {
+                        "jobName": {"type": "string"},
+                        "run": {"$ref": "#/components/schemas/Run"},
+                    },
+                },
+                "UnitRunResponse": {
+                    "type": "object",
+                    "properties": {
+                        "unitName": {"type": "string"},
                         "jobName": {"type": "string"},
                         "run": {"$ref": "#/components/schemas/Run"},
                     },
@@ -204,6 +365,20 @@ def _job_name_parameter(settings: Settings) -> dict:
     }
     if settings.allowed_jobs:
         parameter["schema"]["enum"] = list(settings.allowed_jobs)
+    return parameter
+
+
+def _unit_name_parameter(settings: Settings) -> dict:
+    units = [unit["unitName"] for unit in _unit_metadata(settings)]
+    parameter = {
+        "name": "unitName",
+        "in": "path",
+        "required": True,
+        "schema": {"type": "string"},
+        "example": units[0] if units else "calendar-init",
+    }
+    if units:
+        parameter["schema"]["enum"] = units
     return parameter
 
 

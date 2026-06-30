@@ -20,6 +20,10 @@ GET /
 GET /docs
 GET /openapi.json
 GET /healthz
+GET /units
+POST /units/calendar-init/runs
+GET /units/calendar-init/runs
+GET /units/calendar-init/runs/{executionName}
 POST /jobs/pb-batch/runs
 GET /jobs/pb-batch/runs
 GET /jobs/pb-batch/runs/{executionName}
@@ -65,6 +69,31 @@ az containerapp update \
 ```
 
 Each Job still needs RBAC for the API Managed Identity before `GET` or `POST` works for that Job.
+
+The `/units` endpoints expose the same Jobs by compose/job-yaml deployment unit names. This keeps the GUI aligned with the files in `infra/`:
+
+| Unit name | Backing ACA Job | Source |
+|---|---|---|
+| `calendar-init` | `pb-init-calendar` | `infra/compose.calendar-init.yaml` |
+| `branch-init` | `pb-init-branch` | `infra/compose.branch-init.yaml` |
+| `customer-init` | `pb-init-customer` | `infra/compose.customer-init.yaml` |
+| `product-init` | `pb-init-product` | `infra/compose.product-init.yaml` |
+| `interestrate-init` | `pb-init-interestrate` | `infra/compose.interestrate-init.yaml` |
+| `feeschedule-init` | `pb-init-feeschedule` | `infra/compose.feeschedule-init.yaml` |
+| `account-init` | `pb-init-account` | `infra/compose.account-init.yaml` |
+| `batch-daily` | `pb-batch-daily` | `infra/compose.batch-daily.yaml` |
+| `dormancy-scan` | `pb-dormancy-scan` | `infra/job-dormancy-scan.yaml` |
+| `batch-monthly` | `pb-batch-monthly` | `infra/job-batch-monthly.yaml` |
+| `partition-rollover` | `pb-partition-rollover` | `infra/job-partition-rollover.yaml` |
+| `txn-smoke` | `pb-txn-smoke` | `infra/job-txn-smoke.yaml` |
+
+Examples:
+
+```bash
+curl -s "https://$FQDN/units" | jq
+curl -s "https://$FQDN/units/calendar-init/runs" | jq
+curl -s -X POST "https://$FQDN/units/calendar-init/runs" | jq
+```
 
 ## Build the API image
 
