@@ -5,10 +5,11 @@ WORKDIR /app
 
 # 依存パッケージのインストール
 COPY package*.json ./
-RUN npm ci
+RUN npm install
 
 # アプリケーションのコピーとビルド
 COPY . .
+RUN mkdir -p public
 RUN npm run build
 
 # 本番ステージ
@@ -21,7 +22,7 @@ ENV PORT=3000
 
 # 本番依存のみをインストール
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm install --omit=dev
 
 # builder ステージからビルド結果をコピー
 COPY --from=builder /app/.next ./.next
