@@ -29,6 +29,43 @@ OpenAPI is available at `/openapi.json`. Swagger UI is available at `/docs`.
 
 `POST /jobs/pb-batch/runs` returns `202 Accepted` after Azure accepts the Job start request. Use the `GET` endpoints to inspect executions. Console output remains in Log Analytics as documented in [docs/observability/log-analytics-queries.md](observability/log-analytics-queries.md).
 
+## Existing wrapped Jobs
+
+The API can expose multiple existing ACA Jobs by setting `AZURE_CONTAINERAPP_ALLOWED_JOBS` to a comma-separated list. In the current test environment, the discovered Jobs are:
+
+```text
+pb-batch
+pb-dbcheck
+pb-init-calendar
+pb-init-branch
+pb-init-customer
+pb-init-product
+pb-init-interestrate
+pb-init-feeschedule
+pb-init-account
+pb-batch-daily-rt
+pb-batch-daily
+pb-dormancy-scan
+pb-batch-monthly
+pb-partition-rollover
+pb-txn-smoke
+```
+
+Update the API app to show all of them in `/healthz` and Swagger UI:
+
+```bash
+RESOURCE_GROUP=rg-practicebank
+API_APP=pb-job-api
+JOBS=$(az containerapp job list -g "$RESOURCE_GROUP" --query "[].name" -o tsv | paste -sd, -)
+
+az containerapp update \
+  -g "$RESOURCE_GROUP" \
+  -n "$API_APP" \
+  --set-env-vars AZURE_CONTAINERAPP_ALLOWED_JOBS="$JOBS"
+```
+
+Each Job still needs RBAC for the API Managed Identity before `GET` or `POST` works for that Job.
+
 ## Build the API image
 
 ```bash
@@ -112,6 +149,25 @@ After RBAC propagation, rerun:
 curl -s "https://$FQDN/jobs/pb-batch/runs" | jq
 curl -s -X POST "https://$FQDN/jobs/pb-batch/runs" | jq
 ```
+
+To grant access for every existing Job, run this from an account with `Owner` or `User Access Administrator`:
+
+```bash
+RESOURCE_GROUP=rg-practicebank
+API_APP=pb-job-api
+API_PRINCIPAL_ID=$(az containerapp show -g "$RESOURCE_GROUP" -n "$API_APP" --query identity.principalId -o tsv)
+
+for job in $(az containerapp job list -g "$RESOURCE_GROUP" --query "[].name" -o tsv); do
+  JOB_ID=$(az containerapp job show -g "$RESOURCE_GROUP" -n "$job" --query id -o tsv)
+  az role assignment create \
+    --assignee-object-id "$API_PRINCIPAL_ID" \
+    --assignee-principal-type ServicePrincipal \
+    --role Contributor \
+    --scope "$JOB_ID"
+done
+```
+
+After that, each Job appears in Swagger UI and can be called as `/jobs/{jobName}/runs`. Be careful with `POST`; it starts the selected Job.
 
 ## Access control
 
