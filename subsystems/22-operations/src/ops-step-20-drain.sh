@@ -29,23 +29,39 @@ if [[ "$DRY_RUN" == "Y" ]]; then
     exit 0
 fi
 
+DRIVER=/workspace/subsystems/22-operations/bin/ops-daily-driver
+if [[ ! -x "$DRIVER" ]]; then
+    echo "[OPS-STEP-$STEP_ID] FAIL: missing driver $DRIVER (build: make -C subsystems/22-operations bin/ops-daily-driver)" >&2
+    exit 1
+fi
+MQ_BIN=/workspace/shared/util/mq-publish/bin
+WORK="${OPS_WORK_DIR:-/tmp/ops-daily}"; mkdir -p "$WORK"
+BDATE="${OPS_BUSINESS_DATE:-$(date +%Y%m%d)}"
+
+# e2e-driver と同型: 薄いドライバが INPUT/OUTPUT を確保しワーカーを CALL する
+# drain の入力は step15 が出力した失敗ファイル。MQ は既定 mock(M)。RabbitMQ 実投入は OPS_MQ_MODE=R
 COB_LIBRARY_PATH="$SUBSYS_BIN_DIR:$AUD_BIN:$LOG_BIN" \
+LD_LIBRARY_PATH="$MQ_BIN:${LD_LIBRARY_PATH:-}" \
 LD_PRELOAD=/usr/local/lib/libocesql.so \
 PGHOST=${PGHOST:-postgres} \
 PGUSER=${PGUSER:-cobol} \
 PGPASSWORD=${PGPASSWORD:-cobol} \
 PGDATABASE=${PGDATABASE:-banking} \
-cobcrun "$MODULE" >/tmp/ops-step-$STEP_ID.out 2>&1
+"$DRIVER" step20 \
+    "${OPS_DRAIN_SOURCE:-$WORK/ad-failed-$BDATE.dat}" "${OPS_DRAIN_MAX:-10000}" "${OPS_MQ_MODE:-M}" \
+    >/tmp/ops-step-$STEP_ID.out 2>&1
 rc=$?
 
-if [[ "$rc" -eq 0 ]]; then
-    echo "[OPS-STEP-$STEP_ID] real-mode OK (cobcrun $MODULE rc=0)"
+if [[ "$rc" -eq 0 || "$rc" -eq 1 || "$rc" -eq 4 ]]; then
+    echo "[OPS-STEP-$STEP_ID] real-mode OK (driver $MODULE rc=$rc)"
+    tail -1 /tmp/ops-step-$STEP_ID.out 2>/dev/null || true
     exit 0
 elif [[ "$rc" -ge 8 && "$rc" -le 12 ]]; then
-    echo "[OPS-STEP-$STEP_ID] real-mode SOFT-SKIP (cobcrun $MODULE rc=$rc; prereqs not wired; v1.1 backlog)" >&2
+    echo "[OPS-STEP-$STEP_ID] real-mode SOFT-SKIP (driver $MODULE rc=$rc; data/prereqs not seeded; v1.1 backlog)" >&2
+    tail -1 /tmp/ops-step-$STEP_ID.out >&2 2>/dev/null || true
     exit 0
 else
-    echo "[OPS-STEP-$STEP_ID] real-mode FAIL (cobcrun $MODULE rc=$rc)" >&2
-    head -10 /tmp/ops-step-$STEP_ID.out >&2 2>/dev/null || true
+    echo "[OPS-STEP-$STEP_ID] real-mode FAIL (driver $MODULE rc=$rc)" >&2
+    head -20 /tmp/ops-step-$STEP_ID.out >&2 2>/dev/null || true
     exit 1
 fi

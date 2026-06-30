@@ -57,3 +57,4 @@ Michael Nygard 形式（軽量）。1判断 = 1ファイル。
 | [0027](0027-practice-bank-rehost-no-java-rewrite.md) | Practice Bank は Java rewrite せず rehost コンテナ移行 | Accepted | 2026-06-29 |
 | [0028](0028-subsystem-spec-and-manifest-block.md) | サブシステム単位 spec ＋ manifest subsystems ブロック導入 | Accepted | 2026-06-29 |
 | [0029](0029-mvp-mcp-provision-first-iac-later.md) | MVP は Azure MCP で構築先行、IaC は後追い | Accepted | 2026-06-29 |
+| [0030](0030-production-txn-post-pipeline-aca-job.md) | 本番 txn-post（10→11→12→PG）を専用 ACA Job 化し非破壊・隔離・冪等を必須化 | Proposed | 2026-06-30 |

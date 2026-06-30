@@ -28,12 +28,20 @@
        01  WS-MOCK-PATH              PIC X(120) VALUE
            "/tmp/mq-mock-out.dat".
 
-       01  WS-BROKER-HOST            PIC X(64) VALUE "rabbitmq".
+       01  WS-BROKER-HOST            PIC X(128) VALUE "rabbitmq".
        01  WS-BROKER-USER            PIC X(32) VALUE "cobol".
        01  WS-BROKER-PASS            PIC X(32) VALUE "cobol".
        01  WS-BROKER-QUEUE           PIC X(64) VALUE "pb.events".
        01  WS-BROKER-PORT            PIC S9(9) COMP-5 VALUE 5672.
        01  WS-BROKER-BODY-LEN        PIC S9(4) COMP-5 VALUE 0.
+
+      *> Azure 等で broker 接続先を差し替えるための環境変数オーバーライド。
+      *> 未設定なら上の既定値（devcontainer の rabbitmq:cobol/cobol）を使う。
+       01  WS-ENV-HOST               PIC X(128).
+       01  WS-ENV-USER               PIC X(32).
+       01  WS-ENV-PASS               PIC X(32).
+       01  WS-ENV-QUEUE              PIC X(64).
+       01  WS-ENV-PORT               PIC X(8).
 
        01  WS-MOCK-FLAG              PIC X(1) VALUE "N".
            88  WS-MOCK-ON                       VALUE "Y".
@@ -72,6 +80,7 @@
        PROCEDURE DIVISION USING INTO-INPUT INTO-OUTPUT.
        MAIN-LOGIC.
            PERFORM INIT-OUTPUT
+           PERFORM INIT-BROKER-CONFIG
            PERFORM VALIDATE-INPUT
            IF NOT INTO-OK
                GOBACK
@@ -93,6 +102,33 @@
            MOVE 0 TO INTO-DURATION-MS INTO-RETRY-COUNT
                      WS-RETRY-COUNT WS-PUBLISH-RC
            MOVE "N" TO WS-MOCK-FLAG.
+
+       INIT-BROKER-CONFIG.
+           MOVE SPACES TO WS-ENV-HOST
+           ACCEPT WS-ENV-HOST FROM ENVIRONMENT "RABBITMQ_HOST"
+           IF WS-ENV-HOST NOT = SPACES
+               MOVE WS-ENV-HOST TO WS-BROKER-HOST
+           END-IF
+           MOVE SPACES TO WS-ENV-USER
+           ACCEPT WS-ENV-USER FROM ENVIRONMENT "RABBITMQ_USER"
+           IF WS-ENV-USER NOT = SPACES
+               MOVE WS-ENV-USER TO WS-BROKER-USER
+           END-IF
+           MOVE SPACES TO WS-ENV-PASS
+           ACCEPT WS-ENV-PASS FROM ENVIRONMENT "RABBITMQ_PASS"
+           IF WS-ENV-PASS NOT = SPACES
+               MOVE WS-ENV-PASS TO WS-BROKER-PASS
+           END-IF
+           MOVE SPACES TO WS-ENV-QUEUE
+           ACCEPT WS-ENV-QUEUE FROM ENVIRONMENT "RABBITMQ_QUEUE"
+           IF WS-ENV-QUEUE NOT = SPACES
+               MOVE WS-ENV-QUEUE TO WS-BROKER-QUEUE
+           END-IF
+           MOVE SPACES TO WS-ENV-PORT
+           ACCEPT WS-ENV-PORT FROM ENVIRONMENT "RABBITMQ_PORT"
+           IF WS-ENV-PORT NOT = SPACES
+               COMPUTE WS-BROKER-PORT = FUNCTION NUMVAL(WS-ENV-PORT)
+           END-IF.
 
        VALIDATE-INPUT.
            IF INTO-EVENT-TYPE = SPACES OR

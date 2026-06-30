@@ -1,0 +1,63 @@
+# infra/job-txn-post.yaml — 本番 txn-post パイプライン（10→11→12→Azure PG）の ACA Manual Job（ADR-0030）
+#
+# 非破壊・冪等・隔離(business_date)で 12-txnpost まで投入する。orchestrator は
+# subsystems/22-operations/src/ops-txn-post-run.sh（TRUNCATE しない / 冪等 upsert のみ）。
+#
+# 設計上の注意:
+#   - 12-txnpost は I4 単調性不変条件で「max-closed(batch_run の最新 OK 日) より前」を back-dated 拒否(E020)。
+#     そのため business_date は実行時に max-closed から導出し、back-dated を避ける。
+#   - batch_id は固定（TXNPOST-ACA001）。初回は 90 件 post、再実行は 12-txnpost の冪等性で
+#     already-skipped（二重計上なし）。
+#   - 入力は検証用 fixture（--fixture）。実ファイル投入は ops-txn-post-run.sh の第3引数にパスを渡す。
+#   - dbname=banking は 12-txnpost にハードコードのため隔離 DB は使えない（隔離は business_date）。
+#   - 既知リスク A-1 を継承（AllowAzureServices + 弱パスワード）。共有 banking への本番カットオーバー前に
+#     (B) 資格情報ハードニングが前提（docs/azure-deploy-runbook.md / ADR-0030）。
+#
+# Render: ENV_ID/ACR_USER/ACR_PW/PGPASSWORD。
+location: Japan East
+properties:
+  environmentId: ${ENV_ID}
+  configuration:
+    triggerType: Manual
+    replicaTimeout: 1800
+    replicaRetryLimit: 0
+    manualTriggerConfig:
+      parallelism: 1
+      replicaCompletionCount: 1
+    registries:
+      - server: acrpracticebank45261.azurecr.io
+        username: ${ACR_USER}
+        passwordSecretRef: acr-pwd
+    secrets:
+      - name: acr-pwd
+        value: "${ACR_PW}"
+      - name: pg-pwd
+        value: "${PGPASSWORD}"
+  template:
+    containers:
+      - image: acrpracticebank45261.azurecr.io/practice-bank:app-latest
+        name: txn-post
+        env:
+          - name: PGHOST
+            value: pg-practicebank-5901.postgres.database.azure.com
+          - name: PGUSER
+            value: cobol
+          - name: PGDATABASE
+            value: banking
+          - name: PGSSLMODE
+            value: require
+          - name: PGPASSWORD
+            secretRef: pg-pwd
+        args:
+          - >-
+            set -e &&
+            make build-all &&
+            make -C tests/e2e build &&
+            BID=TXNPOST-ACA001 &&
+            BDATE=$(psql -h $PGHOST -U $PGUSER -d $PGDATABASE -tAc "SELECT TO_CHAR(COALESCE(MAX(business_date), CURRENT_DATE),'YYYYMMDD') FROM batch_run WHERE status='OK' AND completed_ts IS NOT NULL") &&
+            if [ -z "$BDATE" ]; then BDATE=$(date +%Y%m%d); fi &&
+            echo "[pb-txn-post] batch=$BID business_date=$BDATE (= max-closed, avoids E020)" &&
+            bash subsystems/22-operations/src/ops-txn-post-run.sh "$BID" "$BDATE" --fixture
+        resources:
+          cpu: 1.0
+          memory: 2.0Gi
