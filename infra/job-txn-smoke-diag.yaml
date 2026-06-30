@@ -1,0 +1,66 @@
+# infra/job-txn-smoke-diag.yaml — txn smoke の失敗箇所を特定する一時診断 Job（観測専用）
+#
+# ACA からはログ取得が devbox 環境でハングするため、各ステップの rc と失敗時の出力末尾を
+# Azure PG の専用テーブル deploy_diag に書き込み、devbox の psql から読む（banking 業務
+# テーブルは一切触らない＝非破壊）。原因特定後は本 Job を削除する。
+#
+# Render: ENV_ID/ACR_USER/ACR_PW/PGPASSWORD。
+location: Japan East
+properties:
+  environmentId: ${ENV_ID}
+  configuration:
+    triggerType: Manual
+    replicaTimeout: 1800
+    replicaRetryLimit: 0
+    manualTriggerConfig:
+      parallelism: 1
+      replicaCompletionCount: 1
+    registries:
+      - server: acrpracticebank45261.azurecr.io
+        username: ${ACR_USER}
+        passwordSecretRef: acr-pwd
+    secrets:
+      - name: acr-pwd
+        value: "${ACR_PW}"
+      - name: pg-pwd
+        value: "${PGPASSWORD}"
+  template:
+    containers:
+      - image: acrpracticebank45261.azurecr.io/practice-bank:app-latest
+        name: txn-smoke-diag
+        env:
+          - name: PGHOST
+            value: pg-practicebank-5901.postgres.database.azure.com
+          - name: PGUSER
+            value: cobol
+          - name: PGDATABASE
+            value: banking
+          - name: PGSSLMODE
+            value: require
+          - name: PGPASSWORD
+            secretRef: pg-pwd
+        args:
+          - >-
+            set +e &&
+            WS=/workspace && W=/tmp/e2e-smoke && mkdir -p $W/tmp &&
+            export E2E_TOTAL=100 E2E_VALID_RATIO=90 E2E_BATCH_ID=E2E-SMOK-001 E2E_BDATE=20260612 E2E_OUTPUT=$W/txn-decoded.dat &&
+            export COB_LIBRARY_PATH=$WS/subsystems/10-txnvalidate/bin:$WS/subsystems/11-txnsortmerge/bin:$WS/subsystems/12-txnpost/bin:$WS/subsystems/01-calendar/bin:$WS/subsystems/02-branch/bin:$WS/subsystems/05-product/bin:$WS/subsystems/08-account/bin:$WS/shared/util/aud-write/bin:$WS/shared/util/shared-log/bin &&
+            D=$WS/tests/e2e && L=/tmp/diag.log && O=/tmp/diag.out && : > $L && : > $O &&
+            step() { echo "[$1]" >> $L; shift; "$@" >> $O 2>&1; local rc=$?; echo "  rc=$rc" >> $L; if [ $rc -ne 0 ]; then echo "  STEP-FAILED" >> $L; FAILED=$1; fi; } &&
+            step build-all make build-all ;
+            step e2e-build make -C tests/e2e build ;
+            step cal-load make -C subsystems/01-calendar load-idx ;
+            step seed $D/bin/e2e-seed-isam ;
+            step fixture $D/bin/e2e-fixture-gen ;
+            step stage2 $D/bin/e2e-driver stage2 $E2E_BATCH_ID $E2E_BDATE $W/txn-decoded.dat $W/txn-valid.dat $W/txn-error.dat $W/txval.ckpt ;
+            step stage3 $D/bin/e2e-driver stage3 $E2E_BATCH_ID $E2E_BDATE $W/txn-valid.dat $W/txn-sorted.dat $W/txsm-sort.ckpt ;
+            : > $W/txn-recon-prev.dat ;
+            step stage4 $D/bin/e2e-driver stage4 $E2E_BATCH_ID $E2E_BDATE $W/txn-sorted.dat $W/txn-recon-prev.dat $W/txn-ready.dat $W/txn-error.dat $W/txsm-merge.ckpt $W/tmp/txn-ready-d-only.tmp ;
+            NOTE="$(cat $L | tr '\n' '|' | tr -d "'")" ;
+            TAIL="$(tail -c 1800 $O | tr '\n' '~' | tr -d "'")" ;
+            psql -v ON_ERROR_STOP=0 -c "CREATE TABLE IF NOT EXISTS deploy_diag(id serial primary key, ts timestamptz default now(), steps text, tail text);" ;
+            psql -v ON_ERROR_STOP=0 -c "INSERT INTO deploy_diag(steps, tail) VALUES ('$NOTE', '$TAIL');" ;
+            echo "DIAG-DONE rc-summary:" ; cat $L ; exit 0
+        resources:
+          cpu: 1.0
+          memory: 2.0Gi

@@ -34,14 +34,14 @@ int rmq_pub(const char *host_buf,
             const char *body_buf,
             const short *body_len) {
 
-    char host[65]  = {0};
+    char host[129] = {0};
     char user[33]  = {0};
     char pass[33]  = {0};
     char queue[65] = {0};
     int  blen      = (int)(*body_len);
 
     /* Strip trailing spaces from COBOL-padded strings */
-    strncpy(host,  host_buf,  64); for (int i=63; i>=0; --i) if (host[i]==' ')  host[i]=0;  else break;
+    strncpy(host,  host_buf,  128); for (int i=127; i>=0; --i) if (host[i]==' ')  host[i]=0;  else break;
     strncpy(user,  user_buf,  32); for (int i=31; i>=0; --i) if (user[i]==' ')  user[i]=0;  else break;
     strncpy(pass,  pass_buf,  32); for (int i=31; i>=0; --i) if (pass[i]==' ')  pass[i]=0;  else break;
     strncpy(queue, queue_buf, 64); for (int i=63; i>=0; --i) if (queue[i]==' ') queue[i]=0; else break;
@@ -79,6 +79,18 @@ int rmq_pub(const char *host_buf,
         amqp_connection_close(conn, AMQP_REPLY_SUCCESS);
         amqp_destroy_connection(conn);
         return 5;
+    }
+
+    /* Idempotently declare a durable queue so messages persist even when no
+       consumer has declared it yet (publisher to default exchange). */
+    amqp_queue_declare(conn, 1, amqp_cstring_bytes(queue),
+                       0 /*passive*/, 1 /*durable*/, 0 /*exclusive*/,
+                       0 /*auto_delete*/, amqp_empty_table);
+    if (amqp_get_rpc_reply(conn).reply_type != AMQP_RESPONSE_NORMAL) {
+        fprintf(stderr, "[rmq_pub] queue_declare(%s) failed\n", queue);
+        amqp_connection_close(conn, AMQP_REPLY_SUCCESS);
+        amqp_destroy_connection(conn);
+        return 7;
     }
 
     amqp_bytes_t body = amqp_cstring_bytes(body_buf);

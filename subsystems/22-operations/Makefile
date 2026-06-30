@@ -43,7 +43,20 @@ GEN_FINALIZE       := $(SRC)/ops-finalize.cob.gen
 GEN_BATCH_DAILY    := $(SRC)/ops-batch-daily.cob.gen
 GEN_BATCH_MONTHLY  := $(SRC)/ops-batch-monthly.cob.gen
 
-build: $(MODULES)
+DAILY_DRIVER := $(BIN)/ops-daily-driver
+DAILY_DRIVER_COPY := \
+    -I /workspace/subsystems/13-interestaccrual/copy/api \
+    -I /workspace/subsystems/15-autodebit/copy/api \
+    -I /workspace/subsystems/16-fee/copy/api \
+    -I /workspace/subsystems/17-statement/copy/api \
+    -I /workspace/subsystems/19-integrationin/copy/api \
+    -I /workspace/subsystems/20-integrationout/copy/api \
+    -I /workspace/shared/copy
+
+build: $(MODULES) $(DAILY_DRIVER)
+
+$(DAILY_DRIVER): $(SRC)/ops-daily-driver.cob | $(BIN)
+	$(COBC) -x -free -O2 -W -Wno-terminator $(DAILY_DRIVER_COPY) -o $@ $<
 
 $(BIN)/ops-seed-audit: $(SRC)/ops-seed-audit.cob | $(BIN)
 	$(COBC) -x $(COBCFLAGS_FREE) -o $@ $<

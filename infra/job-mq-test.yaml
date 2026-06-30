@@ -1,0 +1,72 @@
+# infra/job-mq-test.yaml — step20 実 publish 検証用の一回限り ACA Job。
+#
+# ACA 内（同一 env）から pb-rabbitmq(内部 TCP 5672) へ drain mode=R で publish し、
+# 結果（status/drained）を PG の breadcrumb 表 mq_test_diag に記録する。
+# devbox から ACA 内部 ingress / mgmt(15672) には到達できないため、PG 経由で検証する。
+# 検証後はジョブ削除 + DROP TABLE mq_test_diag（runbook 参照）。
+#
+# Render: ENV_ID / ACR_USER / ACR_PW / PGPASSWORD。
+location: Japan East
+properties:
+  environmentId: ${ENV_ID}
+  configuration:
+    triggerType: Manual
+    replicaTimeout: 1800
+    replicaRetryLimit: 0
+    manualTriggerConfig:
+      parallelism: 1
+      replicaCompletionCount: 1
+    registries:
+      - server: acrpracticebank45261.azurecr.io
+        username: ${ACR_USER}
+        passwordSecretRef: acr-pwd
+    secrets:
+      - name: acr-pwd
+        value: "${ACR_PW}"
+      - name: pg-pwd
+        value: "${PGPASSWORD}"
+  template:
+    containers:
+      - image: acrpracticebank45261.azurecr.io/practice-bank:app-latest
+        name: mq-test
+        env:
+          - name: PGHOST
+            value: pg-practicebank-5901.postgres.database.azure.com
+          - name: PGUSER
+            value: cobol
+          - name: PGDATABASE
+            value: banking
+          - name: PGSSLMODE
+            value: require
+          - name: PGPASSWORD
+            secretRef: pg-pwd
+          - name: RABBITMQ_HOST
+            value: pb-rabbitmq.internal.yellowglacier-d1129b4c.japaneast.azurecontainerapps.io
+          - name: RABBITMQ_USER
+            value: cobol
+          - name: RABBITMQ_PASS
+            value: cobol
+          - name: RABBITMQ_PORT
+            value: "5672"
+          - name: RABBITMQ_QUEUE
+            value: pb.events
+        args:
+          - >-
+            set -e &&
+            make build-all &&
+            W=/tmp/mqt && mkdir -p $W &&
+            REC=$(printf '%-20s%08d%-13s%-80s%015d%-2s%-20s%02d%08d%014d%-18s' "AD-TEST-0000000001" 20260630 "0010010099001" "TEST PAYEE" 10000 "NF" "NSF" 1 20260701 20260630120000 "") &&
+            printf '%s\n' "$REC" > $W/ad-failed.dat &&
+            export COB_LIBRARY_PATH=/workspace/subsystems/20-integrationout/bin:/workspace/shared/util/aud-write/bin:/workspace/shared/util/shared-log/bin &&
+            export LD_LIBRARY_PATH=/workspace/shared/util/mq-publish/bin &&
+            export LD_PRELOAD=/usr/local/lib/libocesql.so &&
+            OUT=$(/workspace/subsystems/22-operations/bin/ops-daily-driver step20 $W/ad-failed.dat 100 R 2>$W/err.txt || true) &&
+            echo "DRIVER-OUT=$OUT" &&
+            ST=$(echo "$OUT" | sed -n 's/.*"status":"\([0-9]*\)".*/\1/p') &&
+            DR=$(echo "$OUT" | sed -n 's/.*"drained":\([0-9]*\).*/\1/p') &&
+            ERRT=$(tail -3 $W/err.txt 2>/dev/null | tr "\n" " " | tr -d "'\"" | cut -c1-300) &&
+            psql "host=$PGHOST user=$PGUSER dbname=$PGDATABASE" -c "CREATE TABLE IF NOT EXISTS mq_test_diag(id serial primary key, ts timestamptz default now(), rmq_host text, status text, drained text, errtail text)" -c "INSERT INTO mq_test_diag(rmq_host,status,drained,errtail) VALUES ('$RABBITMQ_HOST','$ST','$DR','$ERRT')" &&
+            echo "MQ-TEST-DONE status=$ST drained=$DR"
+        resources:
+          cpu: 1.0
+          memory: 2.0Gi
