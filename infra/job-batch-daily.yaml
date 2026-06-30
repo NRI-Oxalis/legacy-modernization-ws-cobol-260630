@@ -52,6 +52,18 @@ properties:
             value: "MVP-DAILY"
           - name: OPS_BUSINESS_DATE
             value: "20260630"
+          - name: OPS_MQ_MODE
+            value: "R"
+          - name: RABBITMQ_HOST
+            value: "pb-rabbitmq"
+          - name: RABBITMQ_USER
+            value: "cobol"
+          - name: RABBITMQ_PASS
+            value: "cobol"
+          - name: RABBITMQ_PORT
+            value: "5672"
+          - name: RABBITMQ_QUEUE
+            value: "pb.events"
           - name: PGHOST
             value: "pg-practicebank-5901.postgres.database.azure.com"
           - name: PGUSER
