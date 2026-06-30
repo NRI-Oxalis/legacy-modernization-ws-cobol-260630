@@ -52,7 +52,8 @@ export default function JobConsole() {
       const response = await fetch("/api/units", { cache: "no-store" });
       const payload = (await response.json()) as UnitListResponse | { error?: string; details?: string };
       if (!response.ok || !("units" in payload)) {
-        throw new Error(payload.error || payload.details || "Failed to load units");
+        const errorMsg = "error" in payload ? (payload.error || payload.details) : "Failed to load units";
+        throw new Error(errorMsg || "Failed to load units");
       }
       setUnits(payload.units);
     } catch (error) {
@@ -70,7 +71,8 @@ export default function JobConsole() {
       });
       const payload = (await response.json()) as UnitRunListResponse | { error?: string; details?: string };
       if (!response.ok || !("runs" in payload)) {
-        throw new Error(payload.error || payload.details || "Failed to load runs");
+        const errorMsg = "error" in payload ? (payload.error || payload.details) : "Failed to load runs";
+        throw new Error(errorMsg || "Failed to load runs");
       }
       setRunsByUnit((prev) => ({ ...prev, [unitName]: payload.runs }));
     } catch (error) {
@@ -90,7 +92,8 @@ export default function JobConsole() {
       });
       const payload = (await response.json()) as { error?: string; details?: string };
       if (!response.ok) {
-        throw new Error(payload.error || payload.details || "Failed to start job");
+        const errorMsg = payload.error || payload.details || "Failed to start job";
+        throw new Error(errorMsg);
       }
       await loadRuns(unitName);
     } catch (error) {
