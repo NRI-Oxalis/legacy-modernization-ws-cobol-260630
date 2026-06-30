@@ -1,0 +1,240 @@
+:root {
+  --bg-top: #f6efe1;
+  --bg-bottom: #d9f2ef;
+  --ink: #132126;
+  --ink-soft: #425a62;
+  --card: rgba(255, 255, 255, 0.82);
+  --line: rgba(19, 33, 38, 0.12);
+  --accent: #0a7f6f;
+  --accent-2: #f08c32;
+  --error: #c53030;
+  --ok: #2f855a;
+  --running: #b7791f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+}
+
+body {
+  color: var(--ink);
+  font-family: var(--font-body), sans-serif;
+  background:
+    radial-gradient(1200px 600px at 110% -10%, rgba(240, 140, 50, 0.16), transparent 60%),
+    radial-gradient(900px 500px at -5% 10%, rgba(10, 127, 111, 0.22), transparent 55%),
+    linear-gradient(160deg, var(--bg-top), var(--bg-bottom));
+}
+
+.page-wrap {
+  width: min(1180px, 100% - 2rem);
+  margin: 0 auto;
+  padding: 2rem 0 3rem;
+}
+
+.hero {
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.65));
+  backdrop-filter: blur(8px);
+  padding: 1.5rem;
+  box-shadow: 0 18px 40px rgba(10, 31, 33, 0.08);
+  animation: reveal 420ms ease-out both;
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: clamp(1.6rem, 2.2vw, 2.2rem);
+  letter-spacing: 0.02em;
+}
+
+.hero p {
+  margin: 0.8rem 0 0;
+  color: var(--ink-soft);
+  line-height: 1.6;
+}
+
+.hero-actions {
+  margin-top: 1.2rem;
+}
+
+.grid {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--card);
+  padding: 1rem;
+  box-shadow: 0 10px 24px rgba(15, 28, 35, 0.08);
+  animation: reveal 500ms ease-out both;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.card-header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.card-header p {
+  margin: 0.35rem 0 0;
+  color: var(--ink-soft);
+  font-size: 0.92rem;
+}
+
+.job-name {
+  align-self: flex-start;
+  background: rgba(10, 127, 111, 0.08);
+  border: 1px solid rgba(10, 127, 111, 0.25);
+  border-radius: 999px;
+  padding: 0.3rem 0.65rem;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.72rem;
+}
+
+.source {
+  margin: 0.9rem 0;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.actions {
+  display: flex;
+  gap: 0.6rem;
+  margin-bottom: 0.75rem;
+}
+
+button {
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+  padding: 0.56rem 0.9rem;
+  font-weight: 600;
+  font-family: var(--font-body), sans-serif;
+  background: linear-gradient(130deg, var(--accent), #0f9f8c);
+  color: white;
+  transition: transform 160ms ease, filter 160ms ease;
+}
+
+button.secondary {
+  background: #f1f5f9;
+  color: #334155;
+}
+
+button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: saturate(110%);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.run-list {
+  border-top: 1px dashed var(--line);
+  padding-top: 0.75rem;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.run-row {
+  border: 1px solid rgba(19, 33, 38, 0.08);
+  border-radius: 10px;
+  padding: 0.56rem;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.run-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.84rem;
+}
+
+.run-time {
+  margin-top: 0.4rem;
+  display: grid;
+  gap: 0.2rem;
+  color: var(--ink-soft);
+  font-size: 0.75rem;
+  font-family: var(--font-mono), monospace;
+}
+
+.pill {
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  border: 1px solid rgba(19, 33, 38, 0.15);
+  background: rgba(255, 255, 255, 0.8);
+  font-size: 0.74rem;
+}
+
+.pill-ok {
+  color: var(--ok);
+  border-color: rgba(47, 133, 90, 0.35);
+}
+
+.pill-running {
+  color: var(--running);
+  border-color: rgba(183, 121, 31, 0.45);
+}
+
+.pill-error {
+  color: var(--error);
+  border-color: rgba(197, 48, 48, 0.4);
+}
+
+.error-text {
+  color: var(--error);
+  margin: 0.2rem 0;
+  font-size: 0.9rem;
+}
+
+.empty {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.88rem;
+}
+
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 768px) {
+  .page-wrap {
+    width: min(100% - 1rem, 920px);
+    padding: 1rem 0 2rem;
+  }
+
+  .hero,
+  .card {
+    border-radius: 14px;
+  }
+}
