@@ -18,6 +18,7 @@
 | ACA Jobs (Schedule) | `pb-partition-rollover` | 監査 partition rollover（ops-driver R / 21-audit）。cron `0 17 24 * *`(UTC)=JST 25日 02:00, real-mode |
 | ACA Jobs (Manual) | `pb-txn-smoke` | 取引パイプライン非破壊スモーク（10-txnvalidate→11-txnsortmerge, PG 不使用 / C-1）。proc=100/valid=90/rej=10 |
 | ACA Jobs (Manual) | `pb-txn-post` | 本番 txn-post パイプライン（10→11→12→Azure PG, 非破壊・冪等 / C-3, ADR-0030）。orchestrator=`subsystems/22-operations/src/ops-txn-post-run.sh` |
+| ACA Apps (internal) | `pb-rabbitmq` | RabbitMQ broker（`rabbitmq:3-management-alpine`、内部 TCP ingress 5672、user/pass=cobol/cobol）。step20 drain の実 publish 先。**job からは短縮名 `pb-rabbitmq` で接続**（FQDN 不可・後述）|
 | ACA Jobs (Manual) | `pb-batch`, `pb-dbcheck` | 既存 |
 
 全 job は単一リポイメージを共有し、job 実行時に `make` でビルドする（Dockerfile が /workspace に全コピー）。
@@ -60,6 +61,11 @@ for j in pb-init-calendar pb-init-branch pb-init-customer pb-init-product \
          pb-txn-smoke pb-txn-post; do
   az containerapp job delete -g rg-practicebank -n "$j" --yes
 done
+```
+
+### RabbitMQ broker 削除
+```bash
+az containerapp delete -g rg-practicebank -n pb-rabbitmq --yes
 ```
 
 ### firewall ルール削除
@@ -105,6 +111,16 @@ job 失敗の原因特定は次の順で行う:
 
 ### 新規 orchestrator/script を job に入れたら image を再ビルドする
 全 job は `acrpracticebank45261.azurecr.io/practice-bank:app-latest` を共有し、`COPY . /workspace` で**ビルド時点**の作業ツリーを焼き込む。リポに新ファイル（例 `ops-txn-post-run.sh`）を足しただけでは image に入らず、job 内で `No such file` 失敗する（build-all は通るので **~40s で失敗**＝紛らわしい）。`az acr build -r acrpracticebank45261 -t practice-bank:app-latest -f infra/Dockerfile .`（クラウドビルド ~1.5min）で再ビルドしてから job を再実行する。追加ファイルは加算的なので既存 job に影響しない。
+
+### step20（drain）の RabbitMQ 実 publish（OPS_MQ_MODE=R）
+
+step20 は失敗ファイル（15-autodebit が出力する自動引落失敗）を `INTO-PUBLISH-EVENT`→`rmq_pub`(librabbitmq) で RabbitMQ `pb.events` へ publish する。
+
+- **broker host は短縮名 `pb-rabbitmq` を使う（重要）**: ACA 内部 ingress の **FQDN（`*.internal.<env>...`）は job から TCP 5672 に到達できない（接続タイムアウト rc=124）**。一方、**ACA service discovery の短縮名 `pb-rabbitmq`（→ `pb-rabbitmq.k8se-apps.svc.cluster.local`）は job から到達可能（rc=0）**。診断は境界付き TCP プローブ（`timeout 8 bash -c 'exec 3<>/dev/tcp/<host>/5672'`）で確認。
+- 接続情報は env で注入（`into-publish-event.cob` を env 化済み）: `RABBITMQ_HOST`/`RABBITMQ_USER`/`RABBITMQ_PASS`/`RABBITMQ_PORT`/`RABBITMQ_QUEUE`。未設定なら devcontainer 既定（`rabbitmq`:cobol/cobol）。
+- `rmq_pub` は publish 前に **durable queue を冪等宣言**するため、consumer 不在でもメッセージが保持される。
+- 検証実績: ローカル（devcontainer rabbitmq）= pb.events に 2 メッセージ着弾・JSON エンベロープ確認。ACA = 一回限り job（短縮名）で drain status=00 / drained=2（PG breadcrumb 経由）。`pb-batch-daily`/`-rt` に `OPS_MQ_MODE=R` + `RABBITMQ_HOST=pb-rabbitmq` を配線済み。実 publish は 15 が失敗を出した時のみ発生。
+- 既知バグ（別件）: `MQ_PUBLISH_COMPLETE`/`MQ_DRAIN_COMPLETE` の AUD-WRITE 監査ペイロードが invalid JSON で INSERT 失敗（publish 自体は status=00 で成功）。
 
 ### pb-txn-post の冪等性と business_date 制約（ADR-0030）
 - **12-txnpost は取引自然キー（source_system+source_seq+business_date 等）で重複排除**する。batch_id ではない。よって**同一 business_date の同一決定的 fixture を別 batch_id で再投入しても `records_posted=0 / already_skipped=N`**（二重計上なし）。これは正しい冪等動作で、ledger 不変条件（I2: DR=CR）を保つ。

@@ -1,0 +1,50 @@
+# infra/job-mq-probe.yaml — ジョブ→pb-rabbitmq(5672) の TCP 到達性を境界付きで確認する診断ジョブ。
+# COBOL を介さず bash /dev/tcp で 8s timeout 接続し、結果を PG breadcrumb(mq_probe_diag) に記録。
+# Render: ENV_ID / ACR_USER / ACR_PW / PGPASSWORD。検証後は削除 + DROP TABLE。
+location: Japan East
+properties:
+  environmentId: ${ENV_ID}
+  configuration:
+    triggerType: Manual
+    replicaTimeout: 300
+    replicaRetryLimit: 0
+    manualTriggerConfig:
+      parallelism: 1
+      replicaCompletionCount: 1
+    registries:
+      - server: acrpracticebank45261.azurecr.io
+        username: ${ACR_USER}
+        passwordSecretRef: acr-pwd
+    secrets:
+      - name: acr-pwd
+        value: "${ACR_PW}"
+      - name: pg-pwd
+        value: "${PGPASSWORD}"
+  template:
+    containers:
+      - image: acrpracticebank45261.azurecr.io/practice-bank:app-latest
+        name: mq-probe
+        env:
+          - name: PGHOST
+            value: pg-practicebank-5901.postgres.database.azure.com
+          - name: PGUSER
+            value: cobol
+          - name: PGDATABASE
+            value: banking
+          - name: PGSSLMODE
+            value: require
+          - name: PGPASSWORD
+            secretRef: pg-pwd
+        args:
+          - >-
+            set +e &&
+            H=pb-rabbitmq.internal.yellowglacier-d1129b4c.japaneast.azurecontainerapps.io &&
+            timeout 8 bash -c "exec 3<>/dev/tcp/$H/5672"; R1=$? &&
+            timeout 8 bash -c "exec 3<>/dev/tcp/pb-rabbitmq/5672"; R2=$? &&
+            ( getent hosts $H; getent hosts pb-rabbitmq ) > /tmp/dns.txt 2>&1 || true &&
+            DNS=$(tr "\n" "|" < /tmp/dns.txt | tr -d "'\"" | cut -c1-200) &&
+            psql "host=$PGHOST user=$PGUSER dbname=$PGDATABASE" -c "CREATE TABLE IF NOT EXISTS mq_probe_diag(id serial primary key, ts timestamptz default now(), fqdn_rc int, short_rc int, dns text)" -c "INSERT INTO mq_probe_diag(fqdn_rc,short_rc,dns) VALUES ($R1,$R2,'$DNS')" &&
+            echo "PROBE-DONE fqdn_rc=$R1 short_rc=$R2 dns=$DNS"
+        resources:
+          cpu: 0.5
+          memory: 1.0Gi

@@ -41,7 +41,7 @@ properties:
           - name: PGPASSWORD
             secretRef: pg-pwd
           - name: RABBITMQ_HOST
-            value: pb-rabbitmq.internal.yellowglacier-d1129b4c.japaneast.azurecontainerapps.io
+            value: pb-rabbitmq
           - name: RABBITMQ_USER
             value: cobol
           - name: RABBITMQ_PASS
